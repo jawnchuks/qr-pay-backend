@@ -20,7 +20,7 @@ dist/
 .DS_Store
 
 # Prisma
-/prisma/migrations/
+# /prisma/migrations/
 # Usually we want migrations, but if the user wants a clean repo, maybe they don't?
 # Actually, the user's PRD mentioned wanting to be "free from errors".
 # Let's include migrations as they are part of the source of truth for the DB schema.
