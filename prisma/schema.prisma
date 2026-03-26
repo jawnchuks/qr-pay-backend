@@ -1,0 +1,191 @@
+generator client {
+  provider      = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model BankUser {
+  id                   String        @id @default(uuid())
+  full_name            String
+  account_number       String        @unique
+  email                String        @unique
+  phone                String
+  balance              Decimal       @default(0.0)
+  daily_transfer_limit Decimal       @default(500000.0)
+  login_password       String
+  transaction_pin      String
+  device_secret        String?       // RFC 6238 TOTP Secret
+  public_key           String?       // secp256r1 Public Key
+  preferences          Json?         // JSON for settings persistence
+  push_token           String?       // Expo Push Token for alerts
+  kyc_tier            Int           @default(1)
+  kyc_status          String        @default("PENDING") // PENDING, VERIFIED, REJECTED
+  avatar_url          String?
+  failed_attempts      Int           @default(0)
+  is_locked            Boolean       @default(false)
+  role                 String        @default("USER") // USER, MERCHANT
+  created_at           DateTime      @default(now())
+  updated_at           DateTime      @updatedAt
+
+  sent_transactions     Transaction[]    @relation("SentTransactions")
+  received_transactions Transaction[]    @relation("ReceivedTransactions")
+  offline_channels      OfflineChannel[]
+  beneficiaries         Beneficiary[]
+  virtual_cards         VirtualCard[]
+  linked_accounts       BankLink[]
+  merchant_profile      MerchantProfile?
+
+  @@map("bank_users")
+}
+
+model BankLink {
+  id             String   @id @default(uuid())
+  user_id        String
+  bank_name      String
+  account_name   String
+  account_number String
+  bank_code      String
+  status         String   @default("ACTIVE")
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user BankUser @relation(fields: [user_id], references: [id])
+
+  @@map("bank_links")
+}
+
+model Transaction {
+  id               String   @id @default(uuid())
+  sender_id        String
+  receiver_id      String?
+  sender_account   String
+  receiver_account String?
+  amount           Decimal
+  transaction_type String
+  category         String   @default("transfer")
+  status           String   @default("pending")
+  description      String?
+  reference        String   @unique
+  is_offline       Boolean  @default(false)
+  metadata         Json?    // Transaction metadata (Meter #, Token #, etc.)
+  created_at       DateTime @default(now())
+
+  sender   BankUser @relation("SentTransactions", fields: [sender_id], references: [id])
+  receiver BankUser? @relation("ReceivedTransactions", fields: [receiver_id], references: [id])
+
+  @@map("transactions")
+}
+
+model OfflineChannel {
+  id               String   @id @default(uuid())
+  channel_id       String   @unique
+  user_id          String
+  allocated_amount Decimal
+  remaining_balance Decimal
+  channel_seq      Int      @default(0)
+  last_hash        String   @default("0000000000000000000000000000000000000000000000000000000000000000")
+  expiry_date      DateTime
+  status           String   @default("ACTIVE") // ACTIVE, CLOSED, EXPIRED
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  user         BankUser             @relation(fields: [user_id], references: [id])
+  transactions OfflineTransaction[]
+
+  @@map("offline_channels")
+}
+
+model OfflineTransaction {
+  id                String   @id @default(uuid())
+  channel_id        String
+  tx_id             String   @unique
+  from_user         String
+  to_user           String
+  amount            Decimal
+  timestamp         DateTime
+  time_counter      BigInt
+  otp               String
+  nonce             String
+  tx_seq            Int
+  category          String   @default("transfer")
+  prev_hash         String
+  current_hash      String
+  digital_signature String
+  metadata          Json?    // Offline transaction metadata
+  status            String   @default("PENDING") // PENDING, VERIFIED, REJECTED
+  rejection_reason  String?
+  created_at        DateTime @default(now())
+
+  channel OfflineChannel @relation(fields: [channel_id], references: [channel_id])
+
+  @@map("offline_transactions")
+}
+
+model UsedNonce {
+  nonce      String   @id
+  used_at    DateTime @default(now())
+
+  @@map("used_nonces")
+}
+
+model ReconciliationLog {
+  id                String   @id @default(uuid())
+  channel_id        String
+  batch_size        Int
+  status            String   @default("SUCCESS")
+  rejection_reason  String?
+  audit_hash        String?  // Hash of the batch for integrity
+  created_at        DateTime @default(now())
+
+  @@map("reconciliation_logs")
+}
+
+model Beneficiary {
+  id             String   @id @default(uuid())
+  user_id        String
+  name           String
+  account_number String
+  bank_name      String
+  is_favorite    Boolean  @default(false)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user BankUser @relation(fields: [user_id], references: [id])
+
+  @@map("beneficiaries")
+}
+
+model VirtualCard {
+  id             String   @id @default(uuid())
+  user_id        String
+  card_number    String   @unique // Masked in responses
+  expiry         String   // MM/YY
+  cvv            String   // Encrypted
+  card_type      String   @default("VISA") // VISA, MASTERCARD
+  status         String   @default("ACTIVE") // ACTIVE, FROZEN, TERMINATED
+  spending_limit Decimal  @default(100000.0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user BankUser @relation(fields: [user_id], references: [id])
+
+  @@map("virtual_cards")
+}
+
+model MerchantProfile {
+  id            String   @id @default(uuid())
+  user_id       String   @unique
+  business_name String
+  category      String
+  website       String?
+  is_verified   Boolean  @default(false)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  user BankUser @relation(fields: [user_id], references: [id])
+
+  @@map("merchant_profiles")
+}

@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "3001:3000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/securebank?schema=public
+      - JWT_SECRET=your_super_secret_jwt_key
+      - NODE_ENV=production
+    depends_on:
+      - db
+    networks:
+      - secure-network
+
+  db:
+    image: postgres:15-alpine
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=securebank
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - secure-network
+
+networks:
+  secure-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
