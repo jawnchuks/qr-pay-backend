@@ -13,6 +13,9 @@ COPY . .
 
 RUN npm run build
 
+COPY scripts/entrypoint.sh ./scripts/
+RUN chmod +x ./scripts/entrypoint.sh
+
 EXPOSE 3000
 
-CMD ["node", "dist/main.js"]
+CMD ["./scripts/entrypoint.sh"]
