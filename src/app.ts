@@ -52,6 +52,7 @@ const createApp = async (): Promise<FastifyInstance> => {
     });
 
     // Health Check
+    fastify.get('/', async () => ({ status: 'ok', message: 'QR Pay Backend API', timestamp: new Date().toISOString() }));
     fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
     // Routes
