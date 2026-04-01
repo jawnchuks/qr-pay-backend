@@ -225,12 +225,12 @@ const transactionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
      * Close Offline Channel
      */
     fastify.post('/close-channel', { onRequest: [fastify.authenticate] }, async (request, reply): Promise<ApiResponse> => {
-        const { channelId, transactions } = request.body as { channelId: string; transactions?: any[] };
+        const { channelId, transactions, amount } = request.body as { channelId: string; transactions?: any[]; amount?: number };
 
         if (!channelId) throw new Error('Channel ID is required');
 
         try {
-            const result = await ReconciliationService.closeChannel(channelId, transactions);
+            const result = await ReconciliationService.closeChannel(channelId, transactions, amount);
             return {
                 success: true,
                 message: 'Channel closed and funds released',

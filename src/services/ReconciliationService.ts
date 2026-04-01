@@ -179,9 +179,9 @@ export class ReconciliationService {
     }
 
     /**
-     * Close an offline state channel and release remaining funds
+     * Close an offline state channel or partially release funds
      */
-    static async closeChannel(channelId: string, batch?: OfflineTransactionInput[]) {
+    static async closeChannel(channelId: string, batch?: OfflineTransactionInput[], reclaimAmount?: number) {
         return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
             // 1. If a final batch is provided, reconcile it first
             if (batch && batch.length > 0) {
@@ -198,29 +198,49 @@ export class ReconciliationService {
             if (channel.status !== 'ACTIVE') throw new Error('Channel is already CLOSED or EXPIRED');
 
             const remainingFunds = channel.remaining_balance.toNumber();
+            const amountToReclaim = reclaimAmount !== undefined ? reclaimAmount : remainingFunds;
 
-            // 3. Close Channel
-            await tx.offlineChannel.update({
-                where: { channel_id: channelId },
-                data: { status: 'CLOSED' }
-            });
+            if (amountToReclaim > remainingFunds) {
+                throw new Error(`Insufficient funds: Requested ₦${amountToReclaim}, Available ₦${remainingFunds}`);
+            }
 
-            // 4. Release remaining funds back to Main Balance
+            // 3. Determine if this is a partial release or a full closure
+            const isFullClosure = reclaimAmount === undefined || amountToReclaim >= remainingFunds;
+
+            if (isFullClosure) {
+                await tx.offlineChannel.update({
+                    where: { channel_id: channelId },
+                    data: { 
+                        status: 'CLOSED',
+                        remaining_balance: 0
+                    }
+                });
+            } else {
+                await tx.offlineChannel.update({
+                    where: { channel_id: channelId },
+                    data: {
+                        remaining_balance: { decrement: amountToReclaim },
+                        allocated_amount: { decrement: amountToReclaim }
+                    }
+                });
+            }
+
+            // 4. Release funds back to Main Balance
             await tx.bankUser.update({
                 where: { id: channel.user_id },
-                data: { balance: { increment: remainingFunds } }
+                data: { balance: { increment: amountToReclaim } }
             });
 
-            // CREATE RECLAIM TRANSACTION RECORD
+            // 5. CREATE TRANSACTION RECORD
             await tx.transaction.create({
                 data: {
                     sender_id: channel.user_id,
                     sender_account: channel.user.account_number,
-                    amount: remainingFunds,
+                    amount: amountToReclaim,
                     transaction_type: 'offline_reclaim',
                     category: 'offline',
                     status: 'completed',
-                    description: 'Reclaim Offline Funds',
+                    description: isFullClosure ? 'Full Offline Reclaim' : 'Partial Offline Reclaim',
                     reference: `RECL-${Date.now().toString(36).toUpperCase()}`,
                 }
             });
@@ -228,8 +248,9 @@ export class ReconciliationService {
             const finalUser = await tx.bankUser.findUnique({ where: { id: channel.user_id } });
 
             return {
-                status: 'CLOSED',
-                releasedAmount: remainingFunds,
+                status: isFullClosure ? 'CLOSED' : 'ACTIVE',
+                releasedAmount: amountToReclaim,
+                remainingBalance: isFullClosure ? 0 : remainingFunds - amountToReclaim,
                 finalBalance: finalUser?.balance.toNumber() || 0
             };
         });
