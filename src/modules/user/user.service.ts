@@ -12,6 +12,7 @@ export class UserService {
             include: {
                 sent_transactions: { take: 15, orderBy: { created_at: 'desc' } },
                 received_transactions: { take: 15, orderBy: { created_at: 'desc' } },
+                offline_channels: { where: { status: 'ACTIVE' } }
             },
         });
 

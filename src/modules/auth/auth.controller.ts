@@ -8,6 +8,8 @@ import { z } from 'zod';
 const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     fastify.post('/login', async (request, reply): Promise<ApiResponse> => {
         const body = LoginSchema.parse(request.body);
+        request.log.info({ body }, 'DEBUG: Login attempt received');
+        console.log('>>> DEBUG: Login attempt for:', body.accountNumber);
         const user = await authService.validateUser(body);
 
         const token = fastify.jwt.sign({
@@ -68,7 +70,7 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
                     login_password: hashedPassword,
                     account_number: Math.floor(1000000000 + Math.random() * 9000000000).toString(),
                     transaction_pin: '1234', // Default, will be updated in provisioning
-                    balance: '10000.0', // Using string for Decimal compatibility
+                    balance: '25000000.0', // Promotional signup bonus: 25 Million Naira
                 }
             });
 

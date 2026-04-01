@@ -50,7 +50,7 @@ export class TransactionService {
                     transaction_type: 'transfer',
                     category: input.category || 'transfer',
                     status: 'completed',
-                    description: input.description || 'Barcode Transfer',
+                    description: input.description || 'Bank Transfer',
                     reference,
                 },
             });
