@@ -40,12 +40,13 @@ const transactionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
      */
     fastify.post('/allocate', { onRequest: [fastify.authenticate] }, async (request, reply): Promise<ApiResponse> => {
         const { id: userId } = request.user as { id: string };
-        const { amount } = request.body as { amount: number };
+        const { amount, pin } = request.body as { amount: number; pin: string };
 
         if (!amount || amount <= 0) throw new BadRequestException('Invalid amount');
+        if (!pin || pin.length !== 4) throw new BadRequestException('Transaction PIN is required');
 
         try {
-            const result = await transactionService.allocateFunds(userId, amount);
+            const result = await transactionService.allocateFunds(userId, amount, pin);
             return {
                 success: true,
                 message: 'Funds allocated successfully',
@@ -225,12 +226,13 @@ const transactionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
      * Close Offline Channel
      */
     fastify.post('/close-channel', { onRequest: [fastify.authenticate] }, async (request, reply): Promise<ApiResponse> => {
-        const { channelId, transactions, amount } = request.body as { channelId: string; transactions?: any[]; amount?: number };
+        const { channelId, transactions, amount, pin } = request.body as { channelId: string; transactions?: any[]; amount?: number; pin: string };
 
         if (!channelId) throw new Error('Channel ID is required');
+        if (!pin || pin.length !== 4) throw new BadRequestException('Transaction PIN is required');
 
         try {
-            const result = await ReconciliationService.closeChannel(channelId, transactions, amount);
+            const result = await ReconciliationService.closeChannel(channelId, transactions, amount, pin);
             return {
                 success: true,
                 message: 'Channel closed and funds released',

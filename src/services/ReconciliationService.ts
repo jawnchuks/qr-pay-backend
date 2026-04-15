@@ -181,7 +181,7 @@ export class ReconciliationService {
     /**
      * Close an offline state channel or partially release funds
      */
-    static async closeChannel(channelId: string, batch?: OfflineTransactionInput[], reclaimAmount?: number) {
+    static async closeChannel(channelId: string, batch?: OfflineTransactionInput[], reclaimAmount?: number, pin?: string) {
         return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
             // 1. If a final batch is provided, reconcile it first
             if (batch && batch.length > 0) {
@@ -195,6 +195,7 @@ export class ReconciliationService {
             });
 
             if (!channel) throw new Error('Channel not found');
+            if (pin && channel.user.transaction_pin !== pin) throw new Error('Invalid transaction PIN');
             if (channel.status !== 'ACTIVE') throw new Error('Channel is already CLOSED or EXPIRED');
 
             const remainingFunds = channel.remaining_balance.toNumber();

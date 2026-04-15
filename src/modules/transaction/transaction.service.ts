@@ -69,20 +69,32 @@ export class TransactionService {
 
     /**
      * Allocate Funds to Offline Channel (State Channel Opening)
+     * Hardened with PIN verification and 100k NGN total limit.
      */
-    async allocateFunds(userId: string, amount: number) {
+    async allocateFunds(userId: string, amount: number, pin: string) {
         return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-            const user = await tx.bankUser.findUnique({ where: { id: userId } });
+            const user = await tx.bankUser.findUnique({ 
+                where: { id: userId },
+                include: { offline_channels: { where: { status: 'ACTIVE' } } }
+            });
+            
             if (!user) throw new BadRequestException('User not found');
+            if (user.transaction_pin !== pin) throw new ForbiddenException('Invalid transaction PIN');
             if (user.balance.toNumber() < amount) throw new BadRequestException('Insufficient funds for allocation');
 
-            // 1. Debit User Balance (IMPORTANT: Persist the freeze)
+            // 1. Enforce 100k NGN Limit across all active offline funds
+            const currentOfflineTotal = user.offline_channels.reduce((sum, ch) => sum + ch.remaining_balance.toNumber(), 0);
+            if (currentOfflineTotal + amount > 100000) {
+                throw new BadRequestException(`Offline limit exceeded. Maximum allowed: ₦100,000. Current offline: ₦${currentOfflineTotal.toLocaleString()}`);
+            }
+
+            // 2. Debit User Balance
             await tx.bankUser.update({
                 where: { id: userId },
                 data: { balance: { decrement: amount } }
             });
 
-            // 2. Create Transaction for History
+            // 3. Create Transaction for History
             const reference = `ALLOC-${Date.now().toString(36).toUpperCase()}`;
             await tx.transaction.create({
                 data: {
@@ -97,19 +109,33 @@ export class TransactionService {
                 }
             });
 
-            // 3. Create Offline Channel
-            const channelId = `CH-${Math.random().toString(36).substr(2, 9)}`;
-            const channel = await tx.offlineChannel.create({
-                data: {
-                    channel_id: channelId,
-                    user_id: userId,
-                    allocated_amount: amount,
-                    remaining_balance: amount,
-                    expiry_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-                }
-            });
-
-            return { ...channel, reference };
+            // 4. Update or Create Offline Channel
+            // We'll top up the first active channel if it exists, otherwise create a new one.
+            const existingChannel = user.offline_channels[0];
+            
+            if (existingChannel) {
+                const updatedChannel = await tx.offlineChannel.update({
+                    where: { id: existingChannel.id },
+                    data: {
+                        allocated_amount: { increment: amount },
+                        remaining_balance: { increment: amount },
+                        expiry_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Reset expiry
+                    }
+                });
+                return { ...updatedChannel, reference, is_topup: true };
+            } else {
+                const channelId = `CH-${Math.random().toString(36).substr(2, 9)}`;
+                const channel = await tx.offlineChannel.create({
+                    data: {
+                        channel_id: channelId,
+                        user_id: userId,
+                        allocated_amount: amount,
+                        remaining_balance: amount,
+                        expiry_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+                    }
+                });
+                return { ...channel, reference, is_topup: false };
+            }
         });
     }
 
