@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../database/prisma.service.js';
 import { BadRequestException, NotFoundException, ForbiddenException } from '../../exceptions/index.js';
+import { SocketService } from '../../services/SocketService.js';
 
 export interface TransferInput {
     senderAccountNumber: string;
@@ -175,9 +176,11 @@ export class TransactionService {
     }
 
     private notifyUser(userId: string, event: string, data: any) {
-        import('../../services/SocketService.js').then(({ SocketService }) => {
+        try {
             SocketService.emitToUser(userId, event, data);
-        }).catch(err => console.error('Socket notification failed:', err));
+        } catch (err) {
+            console.error('Socket notification failed:', err);
+        }
     }
 }
 
