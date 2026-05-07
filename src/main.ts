@@ -1,6 +1,11 @@
 import createApp from './app.js';
 import { env } from './config/env.config.js';
 
+// BigInt Serialization Patch for Fastify/JSON
+(BigInt.prototype as any).toJSON = function () {
+    return this.toString();
+};
+
 const start = async () => {
     const app = await createApp();
     try {
