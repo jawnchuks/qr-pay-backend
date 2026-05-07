@@ -50,7 +50,7 @@ export class TransactionService {
                     transaction_type: 'transfer',
                     category: input.category || 'transfer',
                     status: 'completed',
-                    description: input.description || 'Bank Transfer',
+                    description: input.description || `Transfer from ${sender.full_name} to ${receiver.full_name}`,
                     reference,
                 },
             });
@@ -104,7 +104,7 @@ export class TransactionService {
                     transaction_type: 'offline_allocation',
                     category: 'offline',
                     status: 'completed',
-                    description: 'Offline Wallet Allocation',
+                    description: 'Fund Offline Wallet',
                     reference,
                 }
             });

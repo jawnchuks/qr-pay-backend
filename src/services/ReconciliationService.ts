@@ -146,7 +146,7 @@ export class ReconciliationService {
                             receiver_id: receiver.id,
                             receiver_account: receiver.account_number,
                             amount: txData.amount,
-                            description: `Offline Payment (Settled)`,
+                            description: `Offline Payment from ${channel.user.full_name} to ${receiver.full_name}`,
                             category: txData.category || 'transfer',
                             status: 'COMPLETED',
                             transaction_type: 'transfer',
@@ -241,7 +241,7 @@ export class ReconciliationService {
                     transaction_type: 'offline_reclaim',
                     category: 'offline',
                     status: 'completed',
-                    description: isFullClosure ? 'Full Offline Reclaim' : 'Partial Offline Reclaim',
+                    description: isFullClosure ? 'Restore Full Offline Balance' : 'Partial Balance Restoration',
                     reference: `RECL-${Date.now().toString(36).toUpperCase()}`,
                 }
             });
