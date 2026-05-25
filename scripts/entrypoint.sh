@@ -3,7 +3,7 @@ set -e
 
 echo "=== ENTRYPOINT SCRIPT STARTING ==="
 echo "Current directory: $(pwd)"
-echo "Listing files: $(ls -R)"
+
 
 echo "Syncing database schema..."
 npx prisma db push --skip-generate || { echo "DB Sync failed!"; exit 1; }
