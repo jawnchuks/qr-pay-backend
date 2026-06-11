@@ -1,0 +1,231 @@
+name: Build and Deploy Backend to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'src/**'
+      - 'prisma/**'
+      - 'Dockerfile'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+    inputs:
+      run_seed:
+        description: 'Force run Prisma Seed after deploy'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Verify Docker Hub connection
+        run: |
+          echo "Docker Hub Username: ${{ secrets.DOCKERHUB_USERNAME }}"
+          echo "Repository: ${{ secrets.DOCKERHUB_USERNAME }}/qr-pay-backend"
+          echo "Note: Docker Hub will automatically create the repository when the image is pushed"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/qr-pay-backend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/qr-pay-backend:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/qr-pay-backend:latest
+          cache-to: type=inline
+          platforms: linux/amd64
+
+      - name: Verify image was pushed
+        run: |
+          echo "Verifying image exists on Docker Hub..."
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          docker manifest inspect ${{ secrets.DOCKERHUB_USERNAME }}/qr-pay-backend:latest
+          echo "✓ Image successfully pushed to Docker Hub"
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up SSH key
+        run: |
+          if [ -z "${{ secrets.SERVER_SSH_KEY }}" ]; then
+            echo "Error: SERVER_SSH_KEY secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SERVER_HOST }}" ]; then
+            echo "Error: SERVER_HOST secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SERVER_USER }}" ]; then
+            echo "Error: SERVER_USER secret is not set"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p ${{ secrets.VPS_PORT || 22 }} -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Verify deployment secrets
+        run: |
+          echo "Checking required secrets..."
+          if [ -z "${{ secrets.SERVER_HOST }}" ]; then
+            echo "ERROR: SERVER_HOST secret is empty or not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SERVER_USER }}" ]; then
+            echo "ERROR: SERVER_USER secret is empty or not set"
+            exit 1
+          fi
+          echo "✓ SERVER_HOST is set"
+          echo "✓ SERVER_USER is set"
+          echo "SERVER_HOST value: ${{ secrets.SERVER_HOST }}"
+          echo "SERVER_USER value: ${{ secrets.SERVER_USER }}"
+          echo ""
+          echo "Note: Environment variables will be read from /root/.env/qrpay-backend.env on VPS"
+
+      - name: Deploy to VPS
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
+          RUN_SEED: ${{ github.event.inputs.run_seed || 'false' }}
+        run: |
+          # Verify environment variables are set before SSH
+          if [ -z "$SERVER_HOST" ]; then
+            echo "ERROR: SERVER_HOST environment variable is empty"
+            exit 1
+          fi
+          if [ -z "$SERVER_USER" ]; then
+            echo "ERROR: SERVER_USER environment variable is empty"
+            exit 1
+          fi
+          
+          # Remove any whitespace/newlines from variables
+          SERVER_HOST=$(echo "$SERVER_HOST" | xargs)
+          SERVER_USER=$(echo "$SERVER_USER" | xargs)
+          
+          echo "Connecting to ${SERVER_USER}@${SERVER_HOST} on port ${VPS_PORT}..."
+          
+          ssh -p $VPS_PORT -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${SERVER_USER}@${SERVER_HOST}" bash << EOF
+            set -e
+            export DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME}"
+            export DOCKERHUB_TOKEN="${DOCKERHUB_TOKEN}"
+            export RUN_SEED="${RUN_SEED}"
+            
+            # Login to Docker Hub
+            echo "\$DOCKERHUB_TOKEN" | docker login -u "\$DOCKERHUB_USERNAME" --password-stdin
+            
+            # Stop and remove ONLY the app container
+            docker stop qrpay-backend 2>/dev/null || true
+            docker rm -f qrpay-backend 2>/dev/null || true
+            
+            # Pull latest version
+            echo "Pulling latest version from Docker Hub..."
+            docker pull "\$DOCKERHUB_USERNAME/qr-pay-backend:latest"
+            
+            # Read .env file on VPS
+            ENV_FILE="/root/.env/qrpay-backend.env"
+            USE_ENV_FILE=false
+            
+            if [ -f "\$ENV_FILE" ]; then
+              echo "Reading environment variables from \$ENV_FILE..."
+              set -a
+              source "\$ENV_FILE"
+              set +a
+              USE_ENV_FILE=true
+              echo "✓ Loaded environment variables from \$ENV_FILE"
+            else
+              echo "ERROR: Environment file \$ENV_FILE not found on VPS!"
+              echo "Please create `/root/.env/qrpay-backend.env` on your VPS before running this deployment."
+              exit 1
+            fi
+            
+            # Ensure Docker network exists
+            docker network inspect qrpay-network >/dev/null 2>&1 || \
+              docker network create qrpay-network
+            echo "✓ qrpay-network ready"
+            
+            # Postgres: only start on first deploy, never restart on subsequent pushes
+            if ! docker ps --format '{{.Names}}' | grep -q '^qrpay-postgres$'; then
+              echo "PostgreSQL not running — starting for the first time..."
+              docker rm qrpay-postgres 2>/dev/null || true
+              docker run -d \
+                --name qrpay-postgres \
+                --network qrpay-network \
+                --restart unless-stopped \
+                -e POSTGRES_USER="\$POSTGRES_USER" \
+                -e POSTGRES_PASSWORD="\$POSTGRES_PASSWORD" \
+                -e POSTGRES_DB="\$POSTGRES_DB" \
+                -v qrpay_postgres_data:/var/lib/postgresql/data \
+                postgres:15-alpine
+              echo "Waiting 15s for PostgreSQL to initialise..."
+              sleep 15
+            else
+              echo "✓ PostgreSQL already running — skipping (data preserved)"
+              docker network connect qrpay-network qrpay-postgres 2>/dev/null || true
+            fi
+            
+            CONTAINER_PORT=\${PORT:-3001}
+            
+            # Clear ports if fuser is installed
+            echo "Clearing port \$CONTAINER_PORT..."
+            if command -v fuser >/dev/null 2>&1; then
+              sudo fuser -k \$CONTAINER_PORT/tcp 2>/dev/null || true
+            fi
+
+            # Run the new app container
+            echo "Starting qrpay-backend on port \$CONTAINER_PORT..."
+            docker run -d \
+              --name qrpay-backend \
+              --network qrpay-network \
+              -p "\$CONTAINER_PORT:3000" \
+              --env-file "\$ENV_FILE" \
+              -e NODE_ENV=production \
+              --restart unless-stopped \
+              "\$DOCKERHUB_USERNAME/qr-pay-backend:latest"
+            
+            # Check container health status
+            echo "Checking if container is running..."
+            sleep 3
+            STATUS=\$(docker inspect --format='{{.State.Status}}' qrpay-backend 2>/dev/null || echo "missing")
+            if [ "\$STATUS" != "running" ]; then
+              echo "❌ Container failed to start! Docker logs:"
+              docker logs qrpay-backend
+              exit 1
+            fi
+
+            # Force run Prisma seed if requested
+            if [ "\$RUN_SEED" = "true" ]; then
+              echo "🚀 Running Prisma seed..."
+              docker exec qrpay-backend npx prisma db seed || echo "⚠️ Seed failed, check logs"
+            fi
+            
+            echo "Deployment completed successfully!"
+            docker ps | grep qrpay-backend
+          EOF

@@ -1,4 +1,4 @@
-import * as CryptoJS from 'crypto-js';
+import CryptoJS from 'crypto-js';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const elliptic = require('elliptic');

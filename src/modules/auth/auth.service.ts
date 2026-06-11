@@ -8,14 +8,14 @@ const SALT_ROUNDS = 10;
 export class AuthService {
     async validateUser(input: LoginInput) {
         const user = await prisma.bankUser.findUnique({
-            where: { account_number: input.accountNumber },
+            where: { accountNumber: input.accountNumber },
         });
 
         if (!user) {
             throw new UnauthorizedException('Invalid account number or password');
         }
 
-        const isMatch = await bcrypt.compare(input.password, user.login_password);
+        const isMatch = await bcrypt.compare(input.password, user.passwordHash);
         if (!isMatch) {
             throw new UnauthorizedException('Invalid account number or password');
         }

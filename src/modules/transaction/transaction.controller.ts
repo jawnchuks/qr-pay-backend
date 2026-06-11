@@ -84,6 +84,47 @@ const transactionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
     });
 
     /**
+     * Get Transaction Receipt details
+     */
+    fastify.get('/:id/receipt', { onRequest: [fastify.authenticate] }, async (request, reply): Promise<ApiResponse> => {
+        const { id } = request.params as { id: string };
+        const { id: userId } = request.user;
+
+        const transaction = await prisma.transaction.findUnique({
+            where: { id },
+            include: { sender: true, receiver: true }
+        });
+
+        if (!transaction) throw (fastify as any).httpErrors.notFound('Transaction not found');
+        if (transaction.sender_id !== userId && transaction.receiver_id !== userId) {
+            throw (fastify as any).httpErrors.unauthorized('Access denied');
+        }
+
+        return {
+            success: true,
+            data: {
+                id: transaction.id,
+                reference: transaction.reference,
+                amount: transaction.amount,
+                status: transaction.status,
+                created_at: transaction.created_at,
+                sender_account: transaction.sender_account,
+                receiver_account: transaction.receiver_account,
+                transaction_type: transaction.transaction_type,
+                description: transaction.description,
+                sender: {
+                    full_name: transaction.sender.full_name,
+                    accountNumber: transaction.sender.accountNumber
+                },
+                receiver: transaction.receiver ? {
+                    full_name: transaction.receiver.full_name,
+                    accountNumber: transaction.receiver.accountNumber
+                } : null
+            }
+        };
+    });
+
+    /**
      * Generate PDF Receipt
      */
     fastify.get('/:id/pdf', { onRequest: [fastify.authenticate] }, async (request, reply) => {
@@ -144,7 +185,7 @@ const transactionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
         y += 15;
 
         addRow('Sender', transaction.sender?.full_name || 'N/A');
-        addRow('Sender Account', transaction.sender?.account_number || 'N/A');
+        addRow('Sender Account', transaction.sender?.accountNumber || 'N/A');
         addRow('Recipient', transaction.receiver?.full_name || 'System / Bill Payment');
 
         // Footer
@@ -202,8 +243,8 @@ const transactionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
                 skip: (p - 1) * l,
                 take: l,
                 include: {
-                    sender: { select: { full_name: true, account_number: true } },
-                    receiver: { select: { full_name: true, account_number: true } }
+                    sender: { select: { full_name: true, accountNumber: true } },
+                    receiver: { select: { full_name: true, accountNumber: true } }
                 }
             })
         ]);

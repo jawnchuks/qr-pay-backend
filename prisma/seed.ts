@@ -11,74 +11,95 @@ async function main() {
 
     const users = [
         {
+            firstName: 'John',
+            lastName: 'Doe',
             full_name: 'John Doe',
-            account_number: '1234567890',
+            accountNumber: '1234567890',
             email: 'john@example.com',
             phone: '08012345678',
-            balance: 250000.50,
-            login_password: await bcrypt.hash('password123', SALT_ROUNDS),
+            walletBalance: 250000.50,
+            passwordHash: await bcrypt.hash('password123', SALT_ROUNDS),
             transaction_pin: '1234',
+            registrationStep: 'ACTIVE'
         },
         {
+            firstName: 'Jane',
+            lastName: 'Smith',
             full_name: 'Jane Smith',
-            account_number: '0987654321',
+            accountNumber: '0987654321',
             email: 'jane@example.com',
             phone: '08087654321',
-            balance: 15000.00,
-            login_password: await bcrypt.hash('password456', SALT_ROUNDS),
+            walletBalance: 15000.00,
+            passwordHash: await bcrypt.hash('password456', SALT_ROUNDS),
             transaction_pin: '5678',
+            registrationStep: 'ACTIVE'
         },
         {
+            firstName: 'Alice',
+            lastName: 'Williams',
             full_name: 'Alice Williams',
-            account_number: '1112223334',
+            accountNumber: '1112223334',
             email: 'alice@example.com',
             phone: '08011122233',
-            balance: 1000000.00,
-            login_password: basePass,
+            walletBalance: 1000000.00,
+            passwordHash: basePass,
             transaction_pin: '1111',
+            registrationStep: 'ACTIVE'
         },
         {
+            firstName: 'Bob',
+            lastName: 'Jackson',
             full_name: 'Bob Jackson',
-            account_number: '4445556667',
+            accountNumber: '4445556667',
             email: 'bob@example.com',
             phone: '08044455566',
-            balance: 50000.00,
-            login_password: basePass,
+            walletBalance: 50000.00,
+            passwordHash: basePass,
             transaction_pin: '2222',
+            registrationStep: 'ACTIVE'
         },
         {
+            firstName: 'Charlie',
+            lastName: 'Brown',
             full_name: 'Charlie Brown',
-            account_number: '7778889990',
+            accountNumber: '7778889990',
             email: 'charlie@example.com',
             phone: '08077788899',
-            balance: 75000.00,
-            login_password: basePass,
+            walletBalance: 75000.00,
+            passwordHash: basePass,
             transaction_pin: '3333',
+            registrationStep: 'ACTIVE'
         },
         {
+            firstName: 'David',
+            lastName: 'Wilson',
             full_name: 'David Wilson',
-            account_number: '1231231234',
+            accountNumber: '1231231234',
             email: 'david@example.com',
             phone: '09012312312',
-            balance: 25000.00,
-            login_password: basePass,
+            walletBalance: 25000.00,
+            passwordHash: basePass,
             transaction_pin: '4444',
+            registrationStep: 'ACTIVE'
         },
         {
+            firstName: 'Eve',
+            lastName: 'Adams',
             full_name: 'Eve Adams',
-            account_number: '9879879870',
+            accountNumber: '9879879870',
             email: 'eve@example.com',
             phone: '07098798798',
-            balance: 150000.00,
-            login_password: basePass,
+            walletBalance: 150000.00,
+            passwordHash: basePass,
             transaction_pin: '5555',
+            registrationStep: 'ACTIVE'
         }
     ];
 
     for (const u of users) {
         await prisma.bankUser.upsert({
-            where: { account_number: u.account_number },
-            update: { balance: u.balance }, // Refresh balance to requested amounts
+            where: { accountNumber: u.accountNumber },
+            update: { walletBalance: u.walletBalance },
             create: u
         });
     }

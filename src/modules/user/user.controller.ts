@@ -141,7 +141,7 @@ const userRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
             success: true,
             data: {
                 full_name: user.full_name,
-                account_number: user.account_number
+                account_number: user.accountNumber
             },
         };
     });

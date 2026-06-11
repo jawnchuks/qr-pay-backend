@@ -5,3 +5,10 @@ dist
 npm-debug.log*
 Dockerfile
 docker-compose.yml
+.dockerignore
+.gitignore
+.env.example
+README.md
+.github/
+test-prisma.ts
+scripts/e2e_test.ts

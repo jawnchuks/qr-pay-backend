@@ -8,7 +8,7 @@ const SALT_ROUNDS = 10;
 export class UserService {
     async findByAccountNumber(accountNumber: string): Promise<UserProfile> {
         const user = await prisma.bankUser.findUnique({
-            where: { account_number: accountNumber },
+            where: { accountNumber: accountNumber },
             include: {
                 sent_transactions: { take: 15, orderBy: { created_at: 'desc' } },
                 received_transactions: { take: 15, orderBy: { created_at: 'desc' } },
@@ -27,7 +27,7 @@ export class UserService {
         const user = await prisma.bankUser.findUnique({ where: { id: userId } });
         if (!user) throw new Error('User not found');
 
-        const isMatch = await bcrypt.compare(oldPass, user.login_password);
+        const isMatch = await bcrypt.compare(oldPass, user.passwordHash);
         if (!isMatch) {
             throw new Error('Incorrect current password');
         }
@@ -36,7 +36,7 @@ export class UserService {
 
         return prisma.bankUser.update({
             where: { id: userId },
-            data: { login_password: hashedNewPassword }
+            data: { passwordHash: hashedNewPassword }
         });
     }
 

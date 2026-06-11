@@ -48,10 +48,22 @@ export class ReconciliationService {
             let currentSeq = channel.channel_seq;
             let totalAmount = 0;
 
-            const results = [];
+            const verifiedTxs = [];
+            const quarantinedTxs = [];
 
             // 3. Sequential Validation
+            let isChainBroken = false;
+            let chainBreakReason = '';
+
             for (const txData of sortedTxs) {
+                if (isChainBroken) {
+                    quarantinedTxs.push({
+                        ...txData,
+                        reason: `Preceding transaction failed: ${chainBreakReason}`
+                    });
+                    continue;
+                }
+
                 try {
                     // A. Nonce Uniqueness (Replay Protection)
                     const nonceUsed = await tx.usedNonce.findUnique({ where: { nonce: txData.nonce } });
@@ -106,74 +118,128 @@ export class ReconciliationService {
                     currentSeq = txData.tx_seq;
                     totalAmount += txData.amount;
 
-                    results.push({ tx_id: txData.tx_id, status: 'VERIFIED' });
+                    verifiedTxs.push(txData);
                 } catch (err: any) {
-                    // On any failure, we reject the ENTIRE batch (State Channel Rule)
-                    // This prevents "skipping" transactions in the hash chain
-                    throw new Error(`Batch Reconciliation Failed: ${err.message}`);
+                    isChainBroken = true;
+                    chainBreakReason = err.message;
+                    quarantinedTxs.push({
+                        ...txData,
+                        reason: err.message
+                    });
                 }
             }
 
             // 4. Final Settlement: Update Channel State
-            // (Sender already debited during allocation, so we only adjust channel)
-            await tx.offlineChannel.update({
-                where: { channel_id: channelId },
-                data: {
-                    remaining_balance: channel.allocated_amount.toNumber() - totalAmount,
-                    channel_seq: currentSeq,
-                    last_hash: currentHash
-                }
-            });
-
-            // 5. Credit the receivers & Record Transactions
-            for (const txData of sortedTxs) {
-                const receiver = await tx.bankUser.findUnique({
-                    where: { account_number: txData.to_user }
+            if (verifiedTxs.length > 0) {
+                await tx.offlineChannel.update({
+                    where: { channel_id: channelId },
+                    data: {
+                        remaining_balance: channel.allocated_amount.toNumber() - totalAmount,
+                        channel_seq: currentSeq,
+                        last_hash: currentHash
+                    }
                 });
 
-                if (receiver) {
-                    await tx.bankUser.update({
-                        where: { id: receiver.id },
-                        data: { balance: { increment: txData.amount } }
+                // 5. Credit the receivers & Record Transactions for verified ones
+                for (const txData of verifiedTxs) {
+                    const receiver = await tx.bankUser.findUnique({
+                        where: { accountNumber: txData.to_user }
                     });
 
-                    // Create a transaction record for history
-                    await tx.transaction.create({
-                        data: {
-                            id: txData.tx_id,
-                            sender_id: channel.user_id,
-                            sender_account: channel.user.account_number,
-                            receiver_id: receiver.id,
-                            receiver_account: receiver.account_number,
-                            amount: txData.amount,
-                            description: `Offline Payment from ${channel.user.full_name} to ${receiver.full_name}`,
-                            category: txData.category || 'transfer',
-                            status: 'COMPLETED',
-                            transaction_type: 'transfer',
-                            reference: txData.tx_id
-                        }
-                    });
+                    if (receiver) {
+                        await tx.bankUser.update({
+                            where: { id: receiver.id },
+                            data: { walletBalance: { increment: txData.amount } }
+                        });
+
+                        // Create a transaction record for history
+                        await tx.transaction.create({
+                            data: {
+                                id: txData.tx_id,
+                                sender_id: channel.user_id,
+                                sender_account: channel.user.accountNumber,
+                                receiver_id: receiver.id,
+                                receiver_account: receiver.accountNumber,
+                                amount: txData.amount,
+                                description: `Offline Payment from ${channel.user.full_name} to ${receiver.full_name}`,
+                                category: txData.category || 'transfer',
+                                status: 'COMPLETED',
+                                transaction_type: 'transfer',
+                                reference: txData.tx_id,
+                                is_offline: true
+                            }
+                        });
+
+                        // Create OfflineTransaction record
+                        await tx.offlineTransaction.create({
+                            data: {
+                                tx_id: txData.tx_id,
+                                channel_id: txData.channel_id,
+                                from_user: txData.from_user,
+                                to_user: txData.to_user,
+                                amount: txData.amount,
+                                timestamp: new Date(txData.timestamp),
+                                time_counter: txData.time_counter,
+                                otp: txData.otp,
+                                nonce: txData.nonce,
+                                tx_seq: txData.tx_seq,
+                                prev_hash: txData.prev_hash,
+                                current_hash: txData.current_hash,
+                                digital_signature: txData.digital_signature,
+                                status: 'SUCCESS'
+                            }
+                        });
+                    }
                 }
             }
 
-            // Log the result
+            // 6. Record Quarantined Transactions
+            for (const txData of quarantinedTxs) {
+                await tx.offlineTransaction.create({
+                    data: {
+                        tx_id: txData.tx_id,
+                        channel_id: txData.channel_id,
+                        from_user: txData.from_user,
+                        to_user: txData.to_user,
+                        amount: txData.amount,
+                        timestamp: new Date(txData.timestamp),
+                        time_counter: txData.time_counter,
+                        otp: txData.otp,
+                        nonce: txData.nonce,
+                        tx_seq: txData.tx_seq,
+                        prev_hash: txData.prev_hash,
+                        current_hash: txData.current_hash,
+                        digital_signature: txData.digital_signature,
+                        status: 'QUARANTINED',
+                        rejection_reason: txData.reason
+                    }
+                });
+            }
+
+            // 7. Log the result
+            const logStatus = quarantinedTxs.length > 0
+                ? (verifiedTxs.length > 0 ? 'PARTIAL_SUCCESS' : 'FAILED')
+                : 'SUCCESS';
+
             await tx.reconciliationLog.create({
                 data: {
                     channel_id: channelId,
                     batch_size: sortedTxs.length,
-                    status: 'SUCCESS',
-                    audit_hash: CryptoService.generateBatchHash(sortedTxs)
+                    status: logStatus,
+                    audit_hash: CryptoService.generateBatchHash(sortedTxs),
+                    rejection_reason: logStatus !== 'SUCCESS' ? chainBreakReason : null
                 }
             });
 
-            // 5. Fetch Final State for Synchronization
+            // 8. Fetch Final State for Synchronization
             const finalUser = await tx.bankUser.findUnique({ where: { id: channel.user_id } });
 
             return {
-                status: 'SUCCESS',
-                processed: sortedTxs.length,
+                status: logStatus,
+                processed: verifiedTxs.length,
+                quarantined: quarantinedTxs.length,
                 totalAmount,
-                balance: finalUser?.balance.toNumber() || 0,
+                balance: finalUser?.walletBalance.toNumber() || 0,
             };
         });
     }
@@ -229,14 +295,14 @@ export class ReconciliationService {
             // 4. Release funds back to Main Balance
             await tx.bankUser.update({
                 where: { id: channel.user_id },
-                data: { balance: { increment: amountToReclaim } }
+                data: { walletBalance: { increment: amountToReclaim } }
             });
 
             // 5. CREATE TRANSACTION RECORD
             await tx.transaction.create({
                 data: {
                     sender_id: channel.user_id,
-                    sender_account: channel.user.account_number,
+                    sender_account: channel.user.accountNumber,
                     amount: amountToReclaim,
                     transaction_type: 'offline_reclaim',
                     category: 'offline',
@@ -252,7 +318,7 @@ export class ReconciliationService {
                 status: isFullClosure ? 'CLOSED' : 'ACTIVE',
                 releasedAmount: amountToReclaim,
                 remainingBalance: isFullClosure ? 0 : remainingFunds - amountToReclaim,
-                finalBalance: finalUser?.balance.toNumber() || 0
+                finalBalance: finalUser?.walletBalance.toNumber() || 0
             };
         });
     }

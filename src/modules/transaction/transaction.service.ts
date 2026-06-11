@@ -19,24 +19,48 @@ export class TransactionService {
     async transfer(input: TransferInput) {
         return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
             // 1. Verify Sender & PIN
-            const sender = await tx.bankUser.findUnique({ where: { account_number: input.senderAccountNumber } });
+            const sender = await tx.bankUser.findUnique({ where: { accountNumber: input.senderAccountNumber } });
             if (!sender) throw new BadRequestException('Sender not found');
             if (sender.transaction_pin !== input.pin) throw new ForbiddenException('Invalid transaction PIN');
-            if (sender.balance.toNumber() < input.amount) throw new BadRequestException('Insufficient balance');
+            if (sender.walletBalance.toNumber() < input.amount) throw new BadRequestException('Insufficient balance');
+
+            // Daily Limit Check
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+
+            const todayDebits = await tx.transaction.aggregate({
+                where: {
+                    sender_id: sender.id,
+                    created_at: { gte: todayStart },
+                    status: 'completed',
+                },
+                _sum: {
+                    amount: true,
+                },
+            });
+
+            const currentSpent = todayDebits._sum.amount?.toNumber() || 0;
+            const limit = sender.kycLimitOverride ? sender.dailyDebitLimit.toNumber() : 100000.0;
+
+            if (currentSpent + input.amount > limit) {
+                throw new BadRequestException(
+                    `Daily transfer limit exceeded. Remaining limit: ₦${Math.max(0, limit - currentSpent).toLocaleString()}`
+                );
+            }
 
             // 2. Verify Receiver
-            const receiver = await tx.bankUser.findUnique({ where: { account_number: input.receiverAccountNumber } });
+            const receiver = await tx.bankUser.findUnique({ where: { accountNumber: input.receiverAccountNumber } });
             if (!receiver) throw new BadRequestException('Receiver not found');
 
             // 3. Update Balances
             await tx.bankUser.update({
                 where: { id: sender.id },
-                data: { balance: { decrement: input.amount } },
+                data: { walletBalance: { decrement: input.amount } },
             });
 
             await tx.bankUser.update({
                 where: { id: receiver.id },
-                data: { balance: { increment: input.amount } },
+                data: { walletBalance: { increment: input.amount } },
             });
 
             // 4. Create Transaction Record
@@ -81,7 +105,7 @@ export class TransactionService {
             
             if (!user) throw new BadRequestException('User not found');
             if (user.transaction_pin !== pin) throw new ForbiddenException('Invalid transaction PIN');
-            if (user.balance.toNumber() < amount) throw new BadRequestException('Insufficient funds for allocation');
+            if (user.walletBalance.toNumber() < amount) throw new BadRequestException('Insufficient funds for allocation');
 
             // 1. Enforce 100k NGN Limit across all active offline funds
             const currentOfflineTotal = user.offline_channels.reduce((sum, ch) => sum + ch.remaining_balance.toNumber(), 0);
@@ -92,7 +116,7 @@ export class TransactionService {
             // 2. Debit User Balance
             await tx.bankUser.update({
                 where: { id: userId },
-                data: { balance: { decrement: amount } }
+                data: { walletBalance: { decrement: amount } }
             });
 
             // 3. Create Transaction for History
@@ -100,7 +124,7 @@ export class TransactionService {
             await tx.transaction.create({
                 data: {
                     sender_id: userId,
-                    sender_account: user.account_number,
+                    sender_account: user.accountNumber,
                     amount,
                     transaction_type: 'offline_allocation',
                     category: 'offline',
@@ -148,12 +172,12 @@ export class TransactionService {
             const user = await tx.bankUser.findUnique({ where: { id: userId } });
             if (!user) throw new BadRequestException('User not found');
             if (user.transaction_pin !== pin) throw new ForbiddenException('Invalid transaction PIN');
-            if (user.balance.toNumber() < amount) throw new BadRequestException('Insufficient balance');
+            if (user.walletBalance.toNumber() < amount) throw new BadRequestException('Insufficient balance');
 
             // 1. Debit User Balance
             await tx.bankUser.update({
                 where: { id: userId },
-                data: { balance: { decrement: amount } }
+                data: { walletBalance: { decrement: amount } }
             });
 
             // 2. Create Transaction Record
@@ -161,7 +185,7 @@ export class TransactionService {
             await tx.transaction.create({
                 data: {
                     sender_id: userId,
-                    sender_account: user.account_number,
+                    sender_account: user.accountNumber,
                     amount,
                     transaction_type: 'bill_payment',
                     category,

@@ -9,13 +9,59 @@ datasource db {
 
 model BankUser {
   id                    String           @id @default(uuid())
-  full_name             String
-  account_number        String           @unique
+  firstName             String           @default("")
+  lastName              String           @default("")
+  middleName            String?
   email                 String           @unique
-  phone                 String
-  balance               Decimal          @default(0.0)
-  daily_transfer_limit  Decimal          @default(500000.0)
-  login_password        String
+  phone                 String           @unique
+  passwordHash          String           @map("login_password")
+  accountNumber         String           @unique @map("account_number")
+  referenceId           String           @unique @default(uuid())
+
+  // Keep full_name field for backward compatibility
+  full_name             String           @default("")
+
+  // Auth state
+  isEmailVerified       Boolean          @default(false)
+  isPhoneVerified       Boolean          @default(false)
+  otpCode               String?
+  otpExpiry             DateTime?
+  otpTarget             String?          // "email" | "phone"
+
+  // Onboarding state
+  registrationStep      String           @default("REGISTERED")
+
+  // KYC fields
+  legalFirstName        String?
+  legalLastName         String?
+  legalMiddleName       String?
+  dateOfBirth           DateTime?
+  bvn                   String?          // store encrypted
+  bvnVerified           Boolean          @default(false)
+  livenessCheckPassed   Boolean          @default(false)
+  livenessImageUrl      String?
+  governmentIdType      String?          // NIN | Passport | DriversLicense
+  governmentIdNumber    String?
+  governmentIdUrl       String?
+  kycSubmittedAt        DateTime?
+  kycVerifiedAt         DateTime?
+  kycRejectionReason    String?
+
+  // Address
+  address               String?
+  city                  String?
+  state                 String?
+  country               String?          @default("NG")
+
+  // Transaction limits
+  dailyDebitLimit       Decimal          @default(100000.0) @map("daily_transfer_limit")
+  dailyCreditLimit      Decimal          @default(100000.0)
+  kycLimitOverride      Boolean          @default(false)
+
+  // Wallet
+  walletBalance         Decimal          @default(0.0) @map("balance")
+
+  // Security & Provisioning
   transaction_pin       String
   device_secret         String?
   public_key            String?
@@ -27,8 +73,13 @@ model BankUser {
   failed_attempts       Int              @default(0)
   is_locked             Boolean          @default(false)
   role                  String           @default("USER")
-  created_at            DateTime         @default(now())
-  updated_at            DateTime         @updatedAt
+
+  // Metadata
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+  lastLoginAt           DateTime?
+  deviceTokens          String[]
+
   linked_accounts       BankLink[]
   beneficiaries         Beneficiary[]
   merchant_profile      MerchantProfile?

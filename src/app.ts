@@ -18,6 +18,7 @@ import cardRoutes from './modules/card/card.controller.js';
 import merchantRoutes from './modules/merchant/merchant.controller.js';
 import cmsRoutes from './modules/cms/cms.controller.js';
 import analyticsRoutes from './modules/analytics/analytics.controller.js';
+import kycRoutes from './modules/kyc/kyc.controller.js';
 
 const createApp = async (): Promise<FastifyInstance> => {
     const fastify = Fastify({ logger: true });
@@ -65,6 +66,7 @@ const createApp = async (): Promise<FastifyInstance> => {
     await fastify.register(merchantRoutes, { prefix: '/api/merchant' });
     await fastify.register(cmsRoutes, { prefix: '/api/cms' });
     await fastify.register(analyticsRoutes, { prefix: '/api/analytics' });
+    await fastify.register(kycRoutes, { prefix: '/api/kyc' });
 
     return fastify;
 };
