@@ -204,7 +204,7 @@ jobs:
             docker run -d \
               --name qrpay-backend \
               --network qrpay-network \
-              -p "\$CONTAINER_PORT:3000" \
+              -p "\$CONTAINER_PORT:\$CONTAINER_PORT" \
               --env-file "\$ENV_FILE" \
               -e NODE_ENV=production \
               --restart unless-stopped \
